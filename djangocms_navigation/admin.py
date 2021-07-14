@@ -25,6 +25,7 @@ from .views import ContentObjectSelect2View, MenuContentPreviewView
 
 
 try:
+    from djangocms_versioning.admin import ExtendedVersionAdminMixin
     from djangocms_versioning.exceptions import ConditionFailed
     from djangocms_versioning.helpers import version_list_url
     from djangocms_versioning.models import Version
@@ -58,188 +59,12 @@ class MenuItemChangeList(ChangeList):
         )
 
 
-class MenuContentAdmin(admin.ModelAdmin):
+class MenuContentAdmin(admin.ModelAdmin, ExtendedVersionAdminMixin):
     form = MenuContentForm
     menu_model = Menu
     menu_item_model = MenuItem
     list_display_links = None
     list_filter = (LanguageFilter, )
-
-    class Media:
-        js = ("admin/js/jquery.init.js", "djangocms_versioning/js/actions.js",)
-        css = {"all": ("djangocms_versioning/css/actions.css", "djangocms_version_locking/css/version-locking.css",)}
-
-    def get_version(self, obj):
-        """
-        Return the latest version of a given object
-        :param obj: MenuContent instance
-        :return: Latest Version linked with MenuContent instance
-        """
-        return obj.versions.all()[0]
-
-    def get_versioning_state(self, obj):
-        """
-        Return the state of a given version
-        """
-        return self.get_version(obj).get_state_display()
-
-    get_versioning_state.short_description = _("State")
-
-    def get_author(self, obj):
-        """
-        Return the author who created a version
-        :param obj: MenuContent Instance
-        :return: Author
-        """
-        return self.get_version(obj).created_by
-
-    get_author.short_description = _("Author")
-
-    def get_modified_date(self, obj):
-        """
-        Get the last modified date of a version
-        :param obj: MenuContent Instance
-        :return: Modified Date
-        """
-        return self.get_version(obj).modified
-
-    get_modified_date.short_description = _("Modified")
-
-    def _list_actions(self, request):
-        """
-        A closure that makes it possible to pass request object to
-        list action button functions.
-        """
-
-        def list_actions(obj):
-            """Display links to state change endpoints
-            """
-            return format_html_join(
-                "",
-                "{}",
-                ((action(obj, request),) for action in self.get_list_actions()),
-            )
-
-        list_actions.short_description = _("actions")
-        return list_actions
-
-    def get_list_actions(self):
-        return [
-            self._get_preview_link,
-            self._get_edit_link,
-            self._get_manage_versions_link,
-        ]
-
-    def get_list_display(self, request):
-        menu_content_list_display = ["title"]
-        versioning_enabled = is_versioning_enabled(self.model)
-
-        if versioning_enabled:
-            menu_content_list_display.extend(
-                ["get_author", "get_modified_date", "get_versioning_state"]
-            )
-            # Add version locking specific items
-            if using_version_lock:
-                menu_content_list_display.extend(["is_locked"])
-                # Ensure actions are the last items
-            menu_content_list_display.extend([self._list_actions(request)])
-        else:
-            menu_content_list_display.extend(["get_menuitem_link", "get_preview_link"])
-
-        return menu_content_list_display
-
-    def is_locked(self, obj):
-        version = self.get_version(obj)
-        if version.state == DRAFT and version_is_locked(version):
-            return render_to_string("djangocms_version_locking/admin/locked_icon.html")
-        return ""
-
-    is_locked.short_description = _("Lock State")
-
-    def _get_preview_link(self, obj, request, disabled=False):
-        """
-        Return a user friendly button for previewing the menu contents
-
-        :param obj: Instance of Versioned MenuContent
-        :param request: The request to admin menu
-        :param disabled: Should the link be marked disabled?
-        :return: Preview icon template
-        """
-        return render_to_string(
-            "djangocms_navigation/admin/icons/preview.html",
-            {"url": obj.get_preview_url(), "disabled": disabled},
-        )
-
-    def _get_edit_link(self, obj, request, disabled=False):
-        """
-        Return a user friendly button for editing the menu contents
-        - mark disabled if user doesn't have permission
-        - hide completely if instance cannot be edited
-        :param obj: Instance of Versioned MenuContent
-        :param request: The request to admin menu
-        :param disabled: Should the link be marked disabled?
-        :return: Preview icon template
-        """
-        version = proxy_model(self.get_version(obj), self.model)
-
-        if version.state not in (DRAFT, PUBLISHED):
-            # Don't display the link if it can't be edited
-            return ""
-
-        if not version.check_edit_redirect.as_bool(request.user):
-            disabled = True
-
-        url = reverse(
-            "admin:{app}_{model}_edit_redirect".format(
-                app=version._meta.app_label, model=version._meta.model_name
-            ),
-            args=(version.pk,),
-        )
-        return render_to_string(
-            "djangocms_navigation/admin/icons/edit_icon.html",
-            {"url": url, "disabled": disabled, "get": False},
-        )
-
-    def _get_manage_versions_link(self, obj, request, disabled=False):
-        url = version_list_url(obj)
-        return render_to_string(
-            "djangocms_navigation/admin/icons/manage_versions.html",
-            {"url": url, "disabled": disabled, "action": False},
-        )
-
-    def get_menuitem_link(self, obj):
-        """
-        Return an admin link to the menuitem
-        :param obj: MenuItem Instance
-        :return: Url
-        """
-        object_menuitem_url = reverse(
-            "admin:{app}_{model}_list".format(
-                app=obj._meta.app_label, model=self.menu_item_model._meta.model_name
-            ),
-            args=[obj.pk],
-        )
-
-        return format_html(
-            '<a href="{}" class="js-moderation-close-sideframe" target="_top">'
-            '<span class="cms-icon cms-icon-eye"></span> {}'
-            "</a>",
-            object_menuitem_url,
-            _("Items"),
-        )
-
-    get_menuitem_link.short_description = _("Menu Items")
-
-    def get_preview_link(self, obj):
-        return format_html(
-            '<a href="{}" class="js-moderation-close-sideframe" target="_top">'
-            '<span class="cms-icon cms-icon-eye"></span> {}'
-            "</a>",
-            obj.get_preview_url(),
-            _("Preview"),
-        )
-
-    get_preview_link.short_description = _("Preview")
 
     def get_queryset(self, request):
         queryset = super().get_queryset(request)
@@ -269,7 +94,7 @@ class MenuContentAdmin(admin.ModelAdmin):
             )
         )
 
-    def get_menuitem_link(self, obj):
+    def get_object_link(self, obj):
         object_menuitem_url = reverse(
             "admin:{app}_{model}_list".format(
                 app=obj._meta.app_label, model=self.menu_item_model._meta.model_name
@@ -284,7 +109,7 @@ class MenuContentAdmin(admin.ModelAdmin):
             object_menuitem_url,
             _("Items"),
         )
-    get_menuitem_link.short_description = _("Menu Items")
+    get_object_link.short_description = _("Menu Items")
 
 
 class MenuItemAdmin(TreeAdmin):
